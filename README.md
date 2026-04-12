@@ -100,8 +100,8 @@ Positive CB = surplus. Negative CB = deficit.
 
 ```bash
 # Clone and enter
-git clone <your-repo-url>
-cd fueleu
+git clone https://github.com/SagarDNG/Varuna-Marine.git
+cd Varuna-Marine
 
 # Start all services (Postgres + backend + frontend)
 docker compose up --build
