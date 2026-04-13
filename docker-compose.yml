@@ -40,7 +40,7 @@ services:
       dockerfile: Dockerfile
     container_name: fueleu_frontend
     environment:
-      VITE_API_URL: http://localhost:3001
+      VITE_API_URL: http://fueleu_backend:3001
     ports:
       - '5173:80'
     depends_on:
