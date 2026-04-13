@@ -15,7 +15,11 @@ import type {
   IPoolingPort,
 } from '../../core/ports/api.ports';
 
-const BASE_URL = (import.meta as { env: { VITE_API_URL?: string } }).env.VITE_API_URL ?? '';
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
+
+if (!BASE_URL) {
+  throw new Error('VITE_API_URL is missing');
+}
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
