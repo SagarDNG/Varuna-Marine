@@ -130,6 +130,9 @@ npm run dev        # ts-node-dev on port 3001
 
 ```bash
 cd frontend
+cp .env.example .env
+# Edit .env: set VITE_API_URL accordingly
+
 npm install
 npm run dev        # Vite dev server on port 5173 (proxies API to :3001)
 ```
