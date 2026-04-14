@@ -91,10 +91,17 @@ export function SectionHeader({ title, subtitle }: { title: string; subtitle?: s
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 
 const BTN_STYLES: Record<ButtonVariant, string> = {
-  primary:   'bg-ocean-500 text-white hover:bg-ocean-400 disabled:bg-ocean-500/40',
-  secondary: 'bg-navy-700 text-slate-200 border border-navy-600 hover:bg-navy-600 disabled:opacity-40',
-  danger:    'bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 disabled:opacity-40',
-  ghost:     'text-slate-400 hover:text-white hover:bg-navy-700 disabled:opacity-40',
+  primary:   'bg-ocean-500 text-white hover:bg-ocean-400',
+  secondary: 'bg-navy-700 text-slate-200 border border-navy-600 hover:bg-navy-600',
+  danger:    'bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30',
+  ghost:     'text-slate-400 hover:text-white hover:bg-navy-700',
+};
+
+const BTN_DISABLED_STYLES: Record<ButtonVariant, string> = {
+  primary:   'bg-navy-700 text-slate-600 border border-navy-600 cursor-not-allowed',
+  secondary: 'bg-navy-800 text-slate-600 border border-navy-700 cursor-not-allowed',
+  danger:    'bg-navy-800 text-slate-600 border border-navy-700 cursor-not-allowed',
+  ghost:     'text-slate-600 cursor-not-allowed',
 };
 
 export function Button({
@@ -114,12 +121,15 @@ export function Button({
   type?: 'button' | 'submit';
   className?: string;
 }) {
+  const isDisabled = disabled || loading;
   return (
     <button
       type={type}
       onClick={onClick}
-      disabled={disabled || loading}
-      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${BTN_STYLES[variant]} ${className}`}
+      disabled={isDisabled}
+      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+        isDisabled ? BTN_DISABLED_STYLES[variant] : BTN_STYLES[variant]
+      } ${className}`}
     >
       {loading && <Spinner size="sm" />}
       {children}
