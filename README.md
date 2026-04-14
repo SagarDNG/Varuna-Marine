@@ -308,4 +308,4 @@ Five routes are seeded on startup. R001 is the default baseline.
 **FuelEU Maritime Regulation (EU) 2023/1805** — Annex IV (CB formula), Articles 20–21 (banking and pooling rules).
 
 Calculation methodologies document:  
-[2025 May ESSF SAPS WS1 – FuelEU calculation methodologies](https://file.notion.so/f/f/b87c8e8a-b2b5-484b-8f29-dd49d349f1c2/77cebf3f-450a-40ae-b14c-2d7f629c7973/2025-May-ESSF-SAPS-WS1-FuelEU-calculation-methodologies_(1).pdf?table=block&id=29651e79-ddc8-809b-9189-c6448eaba642&spaceId=b87c8e8a-b2b5-484b-8f29-dd49d349f1c2&expirationTimestamp=1776045600000&signature=9HGWKszWvc6LV96Gg7gNsLJoYwBTKfsoxYGYjefu-x0&downloadName=2025-May-ESSF-SAPS-WS1-FuelEU-calculation-methodologies.pdf)
+[2025 May ESSF SAPS WS1 – FuelEU calculation methodologies](./docs/FuelEU-calculation-methodologies.pdf)
