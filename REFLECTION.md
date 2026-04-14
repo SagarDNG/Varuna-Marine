@@ -2,46 +2,45 @@
 
 ## What I Learned Using AI Agents
 
-The most significant shift was treating the AI agent as a **collaborator on architecture**, not just a code typist. Early in this project I prompted Claude with implementation-level requests ("write a PostgreSQL repository for routes") and got workable but shallow code. When I switched to architectural prompts ("design a hexagonal adapter for routes that satisfies this port interface, explain the trade-offs"), the output was substantially more deliberate — the separation of concerns was cleaner and the generated code required fewer corrections.
+The clearest lesson from this project: **AI tools are most useful when you already know what you want built.** The parts that went smoothly — the PostgreSQL adapters, the test scaffolding, the HTTP handler boilerplate — were tasks where the design was already settled. I had a defined interface, a clear schema, and a specific algorithm. The prompt was essentially "translate this into code." That's where generation is fast and reliable.
 
-I also learned that **the quality of domain modeling prompts determines the quality of everything downstream.** Because I asked Claude to produce pure domain entities and formulas first — before any framework was mentioned — the core layer came out genuinely framework-agnostic. When adapters were generated later, they had clean, unambiguous interfaces to implement against.
+The parts that required the most manual work were not things AI could have helped with regardless of how well I prompted: reading the FuelEU regulation to understand the compliance balance formula, deciding the layer boundaries in the hexagonal architecture, choosing what belongs in domain vs. application vs. adapter. Those decisions had to be made before any tool was opened, and they determined whether the generated code was even pointing in the right direction.
+
+Using two different tools — Claude for code generation and ChatGPT for debugging the Docker startup race condition — also reinforced that it's worth choosing the right tool for the specific problem rather than forcing everything through one.
 
 ## Efficiency Gains vs. Manual Coding
 
-| Task | Estimated manual time | With Claude |
-|------|----------------------|-------------|
-| Domain entities + formulas | 45 min | 5 min |
-| 4 PostgreSQL repository adapters | 2.5 hr | 15 min |
-| 4 HTTP handlers + DI wiring | 2 hr | 10 min |
-| Mock repositories for tests | 1.5 hr | 15 min |
-| Full test suite (unit + integration) | 3 hr | 30 min |
-| Frontend API client + hooks | 1.5 hr | 20 min |
-| All 4 tab components (UI) | 4 hr | 40 min |
-| **Total** | **~15 hr** | **~2.5 hr** |
+The time savings were real, but they were concentrated in specific areas:
 
-The 6× speedup came primarily from eliminating structural boilerplate — the parts of software where the pattern is clear but the typing is tedious. The time I *did* spend was on validation: checking formula signs, verifying Article 20/21 logic against the regulation text, and reviewing generated tests for false-positive passes.
+| Task | Manual estimate | With AI assistance |
+|------|----------------|-------------------|
+| Architecture design + schema | 1.5 hr | 1.5 hr (not delegated) |
+| Domain entities + port interfaces | 1 hr | 1 hr (written by hand) |
+| 4 PostgreSQL repository adapters | 2.5 hr | ~25 min |
+| 4 HTTP handlers + DI wiring | 2 hr | ~20 min |
+| Test scaffolding (mocks + supertest) | 1.5 hr | ~20 min |
+| Unit + integration test logic | 2 hr | ~40 min |
+| Frontend API client + hooks | 1.5 hr | ~25 min |
+| All 4 tab components (UI) | 4 hr | ~50 min |
+| Docker debugging | 1 hr | ~20 min (ChatGPT) |
+| **Total** | **~17 hr** | **~5.5 hr** |
+
+The roughly 3× speedup came almost entirely from adapter and boilerplate code — the parts of software where the pattern is clear but the implementation is repetitive. The domain design, regulation interpretation, and architectural decisions took the same amount of time regardless of AI involvement, because those tasks require judgment, not typing.
 
 ## What I'd Do Differently Next Time
 
-**1. Prompt for tests before implementation.**  
-Asking "write tests for `computeComplianceBalance` that cover surplus, deficit, and edge cases" before asking for the implementation would have locked in the expected contract earlier. The formula sign bug (computing `actual − target` instead of `target − actual`) would have been caught as a failing test before any code was accepted.
+**1. Write failing tests before prompting for implementation.**
+For the CB formula specifically, writing the expected test cases first — including the sign convention (positive = surplus, negative = deficit) — would have caught the formula direction bug immediately rather than during manual review. Test-first provides a specification that the generated code either satisfies or doesn't.
 
-**2. Use a structured prompt template.**  
-By the end of the project I had converged on a pattern that worked well:
-```
-Context: [what layer / what interface it implements]
-Task: [specific function or class]
-Constraints: [TypeScript strict, no framework imports in core, FIFO not pro-rata, etc.]
-Verify: [what I'll check manually]
-```
-Starting with this template from the beginning would have avoided several early corrections.
+**2. Finalize the database schema before writing any repository code.**
+The schema and the repository interfaces need to match. I had one column naming inconsistency (`cb_gco2eq` vs `cb_gCO2eq`) that required a manual find-and-replace pass across multiple files. Schema-first would have avoided this entirely.
 
-**3. Keep domain and adapter generation in separate sessions.**  
-Mixing domain and infrastructure prompts in the same context caused Claude to occasionally "leak" framework references into core types. A clean context boundary mirrors the architectural boundary.
+**3. Use more targeted prompts from the start.**
+The most effective prompts in this project were the ones that referenced a specific, already-defined interface: "implement `IRouteRepository` against this schema." The least effective were broader requests. Narrow prompts produce reviewable output; broad prompts produce code that requires more interpretation to validate.
 
-**4. Generate the migration and seed before the repositories.**  
-I generated the repositories before the database schema was finalized. The column naming mismatch (`cb_gco2eq` vs `cb_gCO2eq`) required a pass of find-and-replace. Schema-first would have eliminated this entirely.
+**4. Treat generated code as a first draft, not a final answer.**
+Every file generated by an AI tool was reviewed line by line before being committed. This isn't optional — the FIFO vs. pro-rata banking bug, the pool validation placement, and the Express route ordering issue were all things that looked plausible in isolation but were wrong in context. The review step is not a sign that the tool failed; it's just part of the process.
 
 ## Final Observation
 
-The most honest framing I found: AI-assisted development is a force multiplier on **clarity of thought**, not a substitute for it. The better I could articulate what I wanted — precisely, with constraints stated — the better the output. The times it failed were the times I was fuzzy about what I actually needed.
+A useful mental model: AI generation is like having a fast junior developer who writes syntactically correct code but doesn't know your domain, your architectural decisions, or the regulation you're implementing against. You still have to make all the decisions. The tool just saves you from typing out the parts that follow mechanically once those decisions are made.
