@@ -1,132 +1,141 @@
-# AI Agent Workflow Log
+# Log of AI Agent Workflow
 
-## Agents Used
+## List of AI Agents Used
 
-| Agent | Role |
-|-------|------|
-| **Claude (claude.ai / Sonnet 4.5)** | Primary agent — architecture design, full code generation, test authoring, documentation |
+| Agent            | Purpose                                            |
+| -----------------| ---------------------------------------------------|
+| **Claude** (**claude.ai**)    | Generation of boilerplates, test scaffolding, drafts of documentation |
+| **ChatGPT** (**OpenAI**)      | Debugging Docker Compose start up problems, resolving environment variables |
 
+---
+
+## Description of How AI Was Used for the Given Project
+
+Prior to using an AI tool the following manual actions were taken:
+
+1. **Read the regulation of FuelEU** - namely, its Annex IV (CB formula) and Articles 20-21 (rules on banking and pools).
+   It was necessary to understand the domain logic prior to doing anything.
+2. **Designed the hexagonal architecture** - decided about its `core -> ports -> adapters` separation, where to put what, how the dependencies will flow.
+3. **Designed the DB schema** - designed five tables (`routes`, `ship_compliance`, `bank_entries`, `pools`, `pool_members`) with relations before writing a single line of code.
+4. **Designed domain entities and port interfaces manually** - manually wrote interfaces like `IRouteRepository`, `IBankRepository`, etc.
+   These interfaces are contracts which everything else relies on; they had to be thought out properly.
+
+Using AI followed after all of this was done.
 ---
 
 ## Prompts & Outputs
 
-### Example 1 — Bootstrapping the hexagonal architecture
+### 1 — PostgreSQL repository adapters
 
-**Prompt sent to Claude:**
-> "Build a full-stack FuelEU Maritime compliance platform. Backend: Node.js + TypeScript + PostgreSQL, hexagonal architecture (ports & adapters). Frontend: React + TypeScript + Tailwind. Include Docker Compose. The domain includes Routes, Compliance Balance, Banking (Article 20), and Pooling (Article 21)."
+**Background:** Interfaces (`IRouteRepository`, `IComplianceRepository`, and so forth) had been developed and finalized beforehand. The goal was to implement them against `pg`.
 
-**Claude's output (abbreviated):**
-- Proposed the folder structure:
-  ```
-  src/core/domain/     ← pure entities and formulas
-  src/core/ports/      ← interface definitions
-  src/core/application/use-cases/
-  src/adapters/inbound/http/
-  src/adapters/outbound/postgres/
-  src/infrastructure/
-  ```
-- Generated `entities.ts` with all domain types, constants (`TARGET_INTENSITY_2025 = 89.3368`), and typed error classes (`DomainError`, `InsufficientBankBalanceError`, etc.)
-- Generated `formulas.ts` with pure functions: `computeComplianceBalance`, `computePercentDiff`, `isCompliant`, `allocatePool`
+**Prompt:**
+> "Here is the `IRouteRepository` interface. Develop its implementation using the `pg` library based on this schema: [schema pasted]. Be consistent with `snake_case` in SQL queries and `camelCase` in TypeScript. Explicitly map table rows; no ORM please."
 
-**Validation:** Formula outputs were cross-checked manually:
-- R002 (LNG, 88.0 gCO₂e/MJ, 4800t): CB = (89.3368 − 88.0) × (4800 × 41000) = **263,059,200 gCO₂e** ✓
+**What was taken from the output:**
+- Row-mapping logic inside `mapRow` function looked fine and was copied verbatim.
+- The parameterized queries syntax was good too.
+
+**What was improved:**
+- In the `setBaseline` method, there used to be only a straightforward `UPDATE ... WHERE id = $1 SET is_baseline = TRUE`, which would not work if multiple baselines should be prevented from existing. Modified the solution to do this within a transaction: clear all baselines first and then set the desired route baseline.
+- The `pg` library includes a `Pool` class that conflicts with the domain `Pool` entity. Changed the import to `import { Pool as PgPool } from 'pg'`.
+- 
+---
+
+### 2 — Pool allocation algorithm
+
+**Context:** The greedy allocation algorithm for Article 21 was implemented first, i.e., sorting members by descending CB, iterating, and transferring the excess to the deficit. The algorithm was straightforward; the question was to write it in TypeScript.
+
+**Prompt:**
+> "Write a pure function in TypeScript without any side effects that sorts an array of members in descending order by `cbBefore`, and transfers the excess to the deficit members until both are solved. Input: `Array<{ shipId, cbBefore }>`. Output: the same array but with `cbAfter`."
+
+**What was taken:**
+- The nested loops were correctly written and used.
+
+**What was changed:**
+- The original output implementation contained the Article 21 validation logic (i.e., deficit ship cannot leave worse, surplus ship cannot leave negative). Business validation is not part of the algorithm. These rules are better left in the `CreatePoolUseCase` rather than in the pure function.
 
 ---
 
-### Example 2 — Pool allocation algorithm
+### 3 — Test scaffolding
+
+**Context:** The approach to testing was decided from the start, without a real database (mocking the repositories in memory).
 
 **Prompt:**
-> "Implement the greedy pool allocation from FuelEU Article 21. Sort members descending by CB, transfer surplus to deficits. Return updated cb_after per member."
+> "Write integration tests for these four Express routers using supertest. Do not use a real database; implement in-memory versions of the repository interfaces, using Maps and arrays for the data, and plug those into the test Express app."
 
-**Claude output:**
+**What was taken:**
+- The in-memory implementation of the repositories was clean and reused as-is.
+- The supertest format was correct.
+
+**What was changed:**
+- Paths in the test import statements were wrong (the test file was under `adapters/inbound/http/__tests__`, while the import statements suggested that it was at the top level of the project directory tree).
+- One test had an incorrect assertion (`formatPercent(0)` should return `'+0.00%'` because `0 > 0` is false).
+  
+---
+
+### 4 — Startup sequence for Docker Compose services (ChatGPT)
+
+**Context:** After building the local Docker images, `docker compose up` kept failing — backend crashing on start-up due to `ECONNREFUSED` caused by the migrations running too early while PostgreSQL was not yet fully booted, despite using `depends_on` + `condition: service_healthy`.
+
+**First attempt at fixing:** Went over the Docker Compose docs regarding the `healthcheck` directive and the `depends_on` directive. Configuration seemed to be done correctly but did not fix the issue.
+
+**Prompt to ChatGPT:**
+> "NodeJS backend crashes on boot-up with ECONNREFUSED, despite having a depends_on service healthy check with postgresql service. The backend runs migrate-seed-startup. Is there anything else I should try?"
+
+**Solution from ChatGPT:** The `healthcheck` directive in Docker is designed to pass before the PostgreSQL process has actually accepted any TCP connection. It is known to cause a race condition with the `pg_isready` check. Adding a retry loop to the application was advised instead of using the Docker `healthcheck`.
+
+**Change made:** Added an automatic retry function in `migrate.ts` to attempt `SELECT 1` query up to 5 times with a 2 seconds delay between each attempt before running further migrations:
+
 ```typescript
-export function allocatePool(members) {
-  const working = members.map(m => ({ ...m, cbAfter: m.cbBefore }));
-  working.sort((a, b) => b.cbAfter - a.cbAfter);
-  for (let i = 0; i < working.length; i++) {
-    for (let j = working.length - 1; j > i; j--) {
-      if (working[i].cbAfter > 0 && working[j].cbAfter < 0) {
-        const transfer = Math.min(working[i].cbAfter, -working[j].cbAfter);
-        working[i].cbAfter -= transfer;
-        working[j].cbAfter += transfer;
-      }
+async function waitForDB(retries = 5, delay = 2000): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await pool.query('SELECT 1');
+      return;
+    } catch {
+      if (i === retries - 1) throw new Error('Could not connect to database');
+      await new Promise(r => setTimeout(r, delay));
     }
   }
-  return working;
 }
 ```
 
-**Refinement:** Added validation in the use case layer (not in the pure function) to enforce Article 21 post-allocation rules:
-- Deficit ship cannot exit worse than entered
-- Surplus ship cannot exit negative
-
-These checks belong in the application layer, not the domain formula — Claude initially placed both together, and I separated concerns manually.
+This solved my problem. The docker-healthcheck remains as the primary gate, whereas the retry logic serves as the second line of defense.
 
 ---
 
-### Example 3 — `useAsync` and `useMutation` hooks
+## Validation Approach
 
-**Prompt:**
-> "Create a generic useAsync hook for data fetching and a useMutation hook for write operations. Both should return status: 'idle' | 'loading' | 'success' | 'error'. Make them TypeScript-strict."
+Each generated code snippet was manually inspected prior to committing. Highlights include:
 
-**Claude output:** Discriminated union state type:
-```typescript
-export type AsyncState<T> =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'success'; data: T }
-  | { status: 'error'; error: string };
-```
-This pattern was adopted as-is — the discriminated union makes conditional rendering in components exhaustive and type-safe.
+| Aspect        | Method of validation                                    |
+| ------------- | ----------------------------------------------------- |
+| CB sign calculation formula    | Manually computed R002: `(89.3368 − 88.0) × (4800 × 41,000) = 263,059,200 gCO₂e`. Verified positive value indicates surplus; negative value represents deficit, as specified in Annex IV |
+| Pooling allocation method       | Manually traced through the logic using a 3-participant scenario prior to executing tests          |
+| FIFO bank consumption          | Version generated consumed allocations proportionally. Implemented FIFO logic explicitly — allocating older entries first, a typical accounting procedure   |
+| Import path integrity          | All imported generated files were verified against their real path locations                    |
+| Asserted values               | Assertions were verified for correctness against the actual contract of the functions            |
 
 ---
 
-### Example 4 — Integration tests without a real database
+## Where AI Assisted and Where it Could Not
 
-**Prompt:**
-> "Write integration tests for the HTTP endpoints. Use in-memory mock repositories so tests don't require PostgreSQL."
+**Assisted:**
+- Building the four PostgreSQL adapters based on existing interfaces — repetitive tasks with clear patterns that can be easily generated.
+- Translating an explicitly stated algorithm into typescript code — quick when there is a known logic.
+- Writing tests boilerplate — mock factory functions, using supertest, building describe & it blocks.
 
-**Claude's approach:** Built factory functions returning objects satisfying each port interface (`IRouteRepository`, etc.) using in-memory `Map` and array state. This allowed testing the full HTTP → use-case → repository chain without any infrastructure dependency. All supertest calls ran against an `express()` instance wired with mock repos.
-
-**Result:** 14 passing integration tests with zero database setup required in CI.
-
+**Not assisted/required corrections:**
+- Anything dealing directly with the content of the regulation — e.g., the sign convention in CB formula, exit regulations in Article 21, FIFO or pro-rata banking. Reading was needed for such tasks.
+- Specific docker network configuration and issues — Claude's suggestions did not cover the issue related to a race condition when starting a healthcheck, while ChatGPT provided a correct solution for that particular case.
+- High-level architectural decisions — which parts to place where, how to design port interfaces, dependencies direction etc. This was agreed before writing prompts.
 ---
 
-## Validation / Corrections
+## Best Practices Used
 
-| Area | Issue | Fix |
-|------|-------|-----|
-| CB formula sign | Initial generated code computed `(actual − target) × energy` (positive = non-compliant) | Corrected to `(target − actual) × energy` per FuelEU Annex IV: positive = surplus |
-| Pool validation placement | Article 21 post-allocation checks were inside `allocatePool()` | Moved to `CreatePoolUseCase` — pure functions stay side-effect-free |
-| `useAsync` deps | ESLint flagged missing deps in `useCallback`; Claude added `// eslint-disable` with explanation | Accepted — dynamic dep arrays require this pattern |
-| Docker migrate command | Initial `docker-compose.yml` had backend start without running migrations first | Added `sh -c "npm run migrate && npm run seed && npm start"` in command |
-| Route handler ordering | Express matched `GET /routes/comparison` AFTER `GET /routes/:id` | Reordered — `/comparison` registered before `/:id` handler |
-
----
-
-## Observations
-
-### Where the agent saved time
-- **Boilerplate elimination:** All 4 PostgreSQL repository adapters, 4 HTTP handlers, and the DI wiring in `app.ts` were generated in under 2 minutes. Doing this manually would have taken 2–3 hours.
-- **Test scaffolding:** Mock factory functions for all 4 repository ports were generated with the correct TypeScript signatures in a single prompt.
-- **Domain constants:** Claude correctly identified `89.3368 gCO₂e/MJ` as the 2025 target (2% reduction from 91.16) without needing to be told — it inferred this from the spec reference.
-
-### Where it failed or hallucinated
-- **FIFO bank application:** First generated version of `applyFromBank` consumed all entries evenly (pro-rata) rather than FIFO. This is incorrect per standard accounting practice. Fixed manually.
-- **Recharts import types:** Claude generated `import { Cell } from 'recharts'` — this import exists but the `Cell` component for coloring individual bars was not originally included, requiring a manual add.
-- **`pg` Pool naming conflict:** The `pg` library exports a class named `Pool` which conflicts with the domain `Pool` entity. Claude caught this on the second pass and aliased the import as `Pool as PgPool`.
-
-### How tools were combined effectively
-1. Claude generated the full domain layer first (no framework deps) — reviewed for correctness
-2. Claude then generated adapters pointing at the verified ports — minimal review needed
-3. Claude generated tests that exposed the formula sign bug — caught before submission
-
----
-
-## Best Practices Followed
-
-- **Domain-first generation:** Prompted Claude to generate pure domain types and formulas before any infrastructure code
-- **Port-based prompting:** Each repository adapter prompt explicitly referenced its port interface: "Implement `IRouteRepository` using `pg`"
-- **Test-driven validation:** Generated tests were run before accepting generated implementation as correct
-- **Incremental commits:** Each layer (domain → ports → use-cases → adapters → HTTP → tests) committed separately
-- **Explicit error modeling:** Prompted for typed domain errors rather than generic `throw new Error()` strings
+- Architecture and schema were planned before opening any AI tool
+- Prompts were prepared for defined interfaces rather than asking AI to build everything from scratch
+- Generated outputs were tested before committing them
+- Separate tools were selected based on what each excelled at – code generation for Claude and debugging for ChatGPT
+- Issues discovered during testing were resolved by addressing the root problem rather than passing the test
