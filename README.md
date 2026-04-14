@@ -179,6 +179,7 @@ curl http://localhost:3001/routes
 
 # Set baseline
 curl -X POST http://localhost:3001/routes/<uuid>/baseline
+## You'll get uuid when you run `curl http://localhost:3001/routes`
 
 # Get comparison
 curl http://localhost:3001/routes/comparison
